@@ -10,11 +10,8 @@ import {
   BarChart3,
   LogOut,
   ShieldCheck,
-  Settings,
   Bell,
-  User,
 } from 'lucide-react'
-import { useState } from 'react'
 import { cn } from '@/lib/utils'
 import type { Role } from '@/types'
 
@@ -31,19 +28,29 @@ const roleLabels: Record<Role, string> = {
   agente_saude: 'Agente de Saúde',
 }
 
+const IS_DEV = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
+
+// Dev fallback user
+const DEV_USER = {
+  name: 'Ana Silva',
+  email: 'ana.silva@ubs.gov.br',
+  role: 'gestor' as Role,
+}
+
 export default function DashboardLayout({ children }: { children: React.ReactNode }) {
   const { data: session } = useSession()
   const pathname = usePathname()
 
-  const role = (session?.user as any)?.role as Role | undefined
+  const userName = session?.user?.name ?? (IS_DEV ? DEV_USER.name : 'Usuário')
+  const role = ((session?.user as any)?.role ?? (IS_DEV ? DEV_USER.role : undefined)) as Role | undefined
   const visibleNav = navItems.filter((item) => !role || item.roles.includes(role))
 
-  const initials = session?.user?.name
-    ?.split(' ')
+  const initials = userName
+    .split(' ')
     .map((n) => n[0])
     .slice(0, 2)
     .join('')
-    .toUpperCase() ?? 'US'
+    .toUpperCase()
 
   return (
     <div className="min-h-screen bg-[#f8fafc] flex">
@@ -87,7 +94,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
               <span className="text-white text-xs font-bold">{initials}</span>
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-semibold text-white truncate">{session?.user?.name ?? 'Usuário'}</p>
+              <p className="text-sm font-semibold text-white truncate">{userName}</p>
               <p className="text-xs text-white/40 truncate">{role ? roleLabels[role] : ''}</p>
             </div>
           </div>

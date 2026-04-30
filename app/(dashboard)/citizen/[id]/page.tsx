@@ -38,56 +38,22 @@ interface CitizenDetail extends CitizenSummary {
   interventions: Intervention[]
 }
 
-const MOCK_CITIZEN: CitizenDetail = {
-  id: '1',
-  cns: '7074032856498810',
-  cpf: '04583276104',
-  name: 'Maria das Graças Oliveira',
-  sex: 'F',
-  dateOfBirth: '1967-03-14',
-  age: 57,
-  ubs: 'UBS Periperi',
-  territory: 'Subúrbio Ferroviário',
-  active: true,
-  createdAt: '2023-01-10',
-  updatedAt: '2024-11-25',
-  lastVisit: '2024-11-20',
-  consultationsPerYear: 8,
-  vulnerabilityScore: {
-    id: 'vs1',
-    citizenId: '1',
-    score: 71,
-    category: 'moderado_alto',
-    factors: {
-      housingQuality: 45,
-      incomeNormalized: 82,
-      sanitationNormalized: 60,
-      foodSecurityNormalized: 65,
-    },
-    calculatedAt: '2024-11-25',
-  },
-  clinicalHistory: [
-    { id: 'c1', citizenId: '1', cid10: 'I10', diagnosis: 'Hipertensão Arterial Sistêmica', diagnosedAt: '2015-06-01', status: 'em_acompanhamento' },
-    { id: 'c2', citizenId: '1', cid10: 'E11', diagnosis: 'Diabetes Mellitus tipo 2', diagnosedAt: '2018-02-01', status: 'em_acompanhamento' },
-    { id: 'c3', citizenId: '1', cid10: 'F41.1', diagnosis: 'Transtorno de Ansiedade Generalizada', diagnosedAt: '2021-09-01', status: 'psicossocial' },
-  ],
-  prescriptions: [
-    { id: 'p1', citizenId: '1', medication: 'Losartana Potássica', dosage: '50mg', frequency: '1x/dia', route: 'Oral', status: 'ativo' },
-    { id: 'p2', citizenId: '1', medication: 'Metformina', dosage: '850mg', frequency: '2x/dia', route: 'Oral', status: 'ativo' },
-    { id: 'p3', citizenId: '1', medication: 'Escitalopram', dosage: '10mg', frequency: '1x/dia', route: 'Oral', status: 'ativo' },
-  ],
-  socialRecord: {
-    id: 'sr1',
-    citizenId: '1',
-    housingQuality: 45,
-    monthlyIncome: 1412,
-    sanitationLevel: 3,
-    foodSecurity: 2,
-    educationLevel: 'fundamental',
-    employmentStatus: 'informal',
-    updatedAt: '2024-10-15',
-  },
-  interventions: [],
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function flattenCitizenResponse(data: any): CitizenDetail {
+  // API returns { citizen: {...}, clinicalHistory: [...], ... }
+  // Page expects a flat CitizenDetail
+  if (data.citizen) {
+    return {
+      ...data.citizen,
+      clinicalHistory: data.clinicalHistory ?? [],
+      prescriptions: data.prescriptions ?? [],
+      socialRecord: data.socialRecord ?? undefined,
+      interventions: data.interventions ?? [],
+      vulnerabilityScore: data.vulnerabilityScore ?? data.citizen.vulnerabilityScore,
+    }
+  }
+  // Already flat
+  return data
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -127,10 +93,9 @@ export default function CitizenDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/citizens/${id}`)
       if (!res.ok) throw new Error('Cidadão não encontrado')
-      return res.json()
+      const raw = await res.json()
+      return flattenCitizenResponse(raw)
     },
-    // Fallback to mock during development
-    placeholderData: MOCK_CITIZEN,
   })
 
   if (isLoading) {

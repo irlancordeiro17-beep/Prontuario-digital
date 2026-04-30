@@ -2,8 +2,9 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { z } from 'zod'
-import { addFollowUp, updateInterventionStatus, getIntervention } from '@/lib/services/interventions'
-import { prisma } from '@/lib/prisma'
+import { MOCK_INTERVENTIONS } from '@/lib/mock-data'
+
+const IS_DEV = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
 
 const followUpSchema = z.object({
   note: z.string().min(5).max(1000),
@@ -15,23 +16,50 @@ const statusSchema = z.object({
 })
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-  if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  if (!IS_DEV) {
+    const token = await getToken({ req, secret: process.env.AUTH_SECRET })
+    if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  }
 
   const { id } = await params
-  const data = await getIntervention(id)
-  if (!data) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
-  return NextResponse.json(data)
+
+  // Dev mode: return mock
+  if (IS_DEV || !process.env.DATABASE_URL) {
+    const intervention = MOCK_INTERVENTIONS.find((i) => i.id === id)
+    if (!intervention) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
+    return NextResponse.json(intervention)
+  }
+
+  try {
+    const { getIntervention } = await import('@/lib/services/interventions')
+    const data = await getIntervention(id)
+    if (!data) return NextResponse.json({ error: 'Não encontrado' }, { status: 404 })
+    return NextResponse.json(data)
+  } catch (error) {
+    console.error('[API/interventions/id] GET error:', error)
+    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+  }
 }
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-  if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  if (!IS_DEV) {
+    const token = await getToken({ req, secret: process.env.AUTH_SECRET })
+    if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+  }
 
   const { id } = await params
   const body = await req.json()
 
+  // Dev mode: accept everything
+  if (IS_DEV || !process.env.DATABASE_URL) {
+    return NextResponse.json({ ok: true })
+  }
+
   try {
+    const { addFollowUp, updateInterventionStatus } = await import('@/lib/services/interventions')
+    const { prisma } = await import('@/lib/prisma')
+    const token = await getToken({ req, secret: process.env.AUTH_SECRET })
+
     // Follow-up addition
     if ('note' in body) {
       const parsed = followUpSchema.safeParse(body)
@@ -40,7 +68,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
       }
 
       const user = await prisma.user.findUnique({
-        where: { id: token.id as string },
+        where: { id: (token as any)?.id as string },
         select: { name: true },
       })
 
@@ -48,13 +76,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         interventionId: id,
         note: parsed.data.note,
         date: parsed.data.date,
-        workerId: token.id as string,
+        workerId: (token as any)?.id as string,
         workerName: user?.name ?? 'Desconhecido',
       })
 
       await prisma.auditLog.create({
         data: {
-          userId: token.id as string,
+          userId: (token as any)?.id as string,
           action: 'UPDATE',
           resource: 'intervention',
           resourceId: id,

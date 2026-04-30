@@ -10,6 +10,11 @@ export async function middleware(req: NextRequest) {
   const isPublic = publicRoutes.some((r) => pathname.startsWith(r))
   if (isPublic) return NextResponse.next()
 
+  // DEV bypass — skip auth in development
+  if (process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true') {
+    return NextResponse.next()
+  }
+
   // Read JWT token (works in Edge runtime, no Prisma needed)
   const token = await getToken({ req, secret: process.env.AUTH_SECRET })
 
