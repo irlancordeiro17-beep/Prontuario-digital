@@ -1,23 +1,32 @@
 // app/api/citizens/route.ts — Prontuário Social
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { MOCK_CITIZENS } from '@/lib/mock-data'
+import { sanitizeSearchQuery } from '@/lib/sanitize'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { apiOk, apiUnauthorized, apiRateLimit, apiError } from '@/lib/api-response'
 
-const IS_DEV = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
+const IS_DEMO = !process.env.DATABASE_URL
 
 export async function GET(req: NextRequest) {
-  // Auth check (skip in dev)
-  if (!IS_DEV) {
+  // Rate limit: 30 searches/min per IP
+  const ip = getClientIp(req)
+  const rl = rateLimit(`citizens:${ip}`, { limit: 30, windowMs: 60_000 })
+  if (!rl.allowed) return apiRateLimit()
+
+  // Auth check (skip in demo/dev mode)
+  if (!IS_DEMO && process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS !== 'true') {
     const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-    if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    if (!token) return apiUnauthorized()
   }
 
   const { searchParams } = new URL(req.url)
-  const q = searchParams.get('q')?.trim().toLowerCase() ?? ''
-  const risk = searchParams.get('risk')?.trim() ?? ''
+  // Sanitize all inputs
+  const q = sanitizeSearchQuery(searchParams.get('q') ?? '').toLowerCase()
+  const risk = sanitizeSearchQuery(searchParams.get('risk') ?? '')
 
-  // If no DB configured, return mock data
-  if (IS_DEV || !process.env.DATABASE_URL) {
+  // Demo/dev mode — mock data
+  if (IS_DEMO) {
     let results = [...MOCK_CITIZENS]
 
     if (q) {
@@ -33,20 +42,19 @@ export async function GET(req: NextRequest) {
       results = results.filter((c) => c.vulnerabilityScore?.category === risk)
     }
 
-    // Sort by vulnerability score desc
     results.sort((a, b) => (b.vulnerabilityScore?.score ?? 0) - (a.vulnerabilityScore?.score ?? 0))
 
-    return NextResponse.json(results)
+    return apiOk(results)
   }
 
   // Production: use Prisma service
   try {
     const { searchCitizens } = await import('@/lib/services/citizens')
-    const ubs = searchParams.get('ubs')?.trim() ?? undefined
-    const territory = searchParams.get('territory')?.trim() ?? undefined
+    const ubs = sanitizeSearchQuery(searchParams.get('ubs') ?? '') || undefined
+    const territory = sanitizeSearchQuery(searchParams.get('territory') ?? '') || undefined
 
     if (!q && !ubs && !territory && !risk) {
-      return NextResponse.json([])
+      return apiOk([])
     }
 
     let citizens = await searchCitizens({ q: q || undefined, ubs, territory, take: 30 })
@@ -55,9 +63,8 @@ export async function GET(req: NextRequest) {
       citizens = citizens.filter((c) => c.vulnerabilityScore?.category === risk)
     }
 
-    return NextResponse.json(citizens)
+    return apiOk(citizens)
   } catch (error) {
-    console.error('[API/citizens] GET error:', error)
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+    return apiError(error, 'API/citizens')
   }
 }

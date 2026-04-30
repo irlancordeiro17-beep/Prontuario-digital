@@ -1,66 +1,70 @@
 // app/api/risk/route.ts — Prontuário Social
-import { NextRequest, NextResponse } from 'next/server'
+import { NextRequest } from 'next/server'
 import { getToken } from 'next-auth/jwt'
 import { MOCK_RISK_DATA } from '@/lib/mock-data'
+import { sanitizeText } from '@/lib/sanitize'
+import { rateLimit, getClientIp } from '@/lib/rate-limit'
+import { apiOk, apiUnauthorized, apiBadRequest, apiRateLimit, apiError } from '@/lib/api-response'
 
-const IS_DEV = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
+const IS_DEMO = !process.env.DATABASE_URL
+const ALLOWED_TYPES = ['alerts', 'metrics'] as const
 
 export async function GET(req: NextRequest) {
-  // Auth check (skip in dev)
-  if (!IS_DEV) {
+  const ip = getClientIp(req)
+  const rl = rateLimit(`risk:${ip}`, { limit: 30, windowMs: 60_000 })
+  if (!rl.allowed) return apiRateLimit()
+
+  if (!IS_DEMO && process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS !== 'true') {
     const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-    if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    if (!token) return apiUnauthorized()
   }
 
   const { searchParams } = new URL(req.url)
-  const type = searchParams.get('type') ?? 'alerts'
+  const rawType = sanitizeText(searchParams.get('type') ?? 'alerts')
+  const type = ALLOWED_TYPES.includes(rawType as any) ? rawType : 'alerts'
 
-  // Dev mode: return mock data
-  if (IS_DEV || !process.env.DATABASE_URL) {
-    if (type === 'metrics') {
-      return NextResponse.json(MOCK_RISK_DATA.kpis)
-    }
-    return NextResponse.json(MOCK_RISK_DATA.alerts)
+  if (IS_DEMO) {
+    return apiOk(type === 'metrics' ? MOCK_RISK_DATA.kpis : MOCK_RISK_DATA.alerts)
   }
 
-  // Production: use Prisma service
   try {
     const { getRiskAlerts, getRiskMetrics } = await import('@/lib/services/risk')
     const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-    const ubs = searchParams.get('ubs') ?? (token as any)?.ubs ?? undefined
-    const severity = searchParams.get('severity') ?? undefined
+    const ubs = sanitizeText(searchParams.get('ubs') ?? (token as any)?.ubs ?? '')
+    const severity = sanitizeText(searchParams.get('severity') ?? '')
 
     if (type === 'metrics') {
-      const metrics = await getRiskMetrics((token as any)?.role !== 'admin' ? ubs : undefined)
-      return NextResponse.json(metrics)
+      const metrics = await getRiskMetrics((token as any)?.role !== 'admin' ? ubs || undefined : undefined)
+      return apiOk(metrics)
     }
 
-    const alerts = await getRiskAlerts({ ubs, severity, take: 30 })
-    return NextResponse.json(alerts)
+    const alerts = await getRiskAlerts({ ubs: ubs || undefined, severity: severity || undefined, take: 30 })
+    return apiOk(alerts)
   } catch (error) {
-    console.error('[API/risk] GET error:', error)
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+    return apiError(error, 'API/risk')
   }
 }
 
 export async function POST(req: NextRequest) {
-  if (!IS_DEV) {
+  const ip = getClientIp(req)
+  const rl = rateLimit(`risk-post:${ip}`, { limit: 20, windowMs: 60_000 })
+  if (!rl.allowed) return apiRateLimit()
+
+  if (!IS_DEMO && process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS !== 'true') {
     const token = await getToken({ req, secret: process.env.AUTH_SECRET })
-    if (!token) return NextResponse.json({ error: 'Não autorizado' }, { status: 401 })
+    if (!token) return apiUnauthorized()
   }
 
-  if (IS_DEV || !process.env.DATABASE_URL) {
-    return NextResponse.json({ ok: true })
-  }
+  if (IS_DEMO) return apiOk({ ok: true })
 
   try {
     const { resolveAlert } = await import('@/lib/services/risk')
-    const { alertId } = await req.json()
-    if (!alertId) return NextResponse.json({ error: 'alertId obrigatório' }, { status: 400 })
+    const body = await req.json().catch(() => ({}))
+    const alertId = sanitizeText(body?.alertId ?? '')
+    if (!alertId) return apiBadRequest('alertId é obrigatório')
     await resolveAlert(alertId)
-    return NextResponse.json({ ok: true })
+    return apiOk({ ok: true })
   } catch (error) {
-    console.error('[API/risk] POST error:', error)
-    return NextResponse.json({ error: 'Erro interno' }, { status: 500 })
+    return apiError(error, 'API/risk POST')
   }
 }
