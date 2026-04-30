@@ -1,74 +1,132 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import {
-  Target, CheckSquare, Calendar, FileText, Upload, Check,
-  Clock, ChevronRight, Plus, Home, Briefcase
+  Target, Check, Clock, ChevronRight, Plus, AlertCircle, Loader2, Calendar,
+  CheckSquare, Users,
 } from 'lucide-react'
+import Link from 'next/link'
 
 /* ------------------------------------------------------------------ */
-/*  Mock data                                                           */
+/*  Types                                                               */
 /* ------------------------------------------------------------------ */
 
-const ACTIVE_GOALS = [
-  {
-    id: 'g1',
-    category: 'SAÚDE FAMILIAR',
-    color: '#16a34a',
-    text: 'Regularização da carteira de vacinação das 3 crianças.',
-    deadline: 'Prazo: 15Dez',
-    progress: 60,
-  },
-  {
-    id: 'g2',
-    category: 'EMPREGABILIDADE',
-    color: '#0891b2',
-    text: 'Inclusão do responsável no curso de capacitação do CRAS.',
-    deadline: 'Prazo: 20 Jan',
-    progress: 30,
-  },
-]
-
-const TASKS = [
-  { id: 't1', label: 'Ligar para Unidade Básica de Saúde', done: false },
-  { id: 't2', label: 'Verificar frequência escolar (Novembro)', done: false },
-  { id: 't3', label: 'Solicitar segunda via de RG (Marta)', done: true },
-  { id: 't4', label: 'Encaminhar para Benefício Eventual', done: false },
-]
-
-const HISTORY = [
-  {
-    id: 'h1',
-    type: 'AGENDADO',
-    typeColor: '#0891b2',
-    title: 'Retorno e Avaliação de Metas',
-    date: '02 Dez 2023 · 14:00',
-  },
-  {
-    id: 'h2',
-    type: 'CONCLUÍDO',
-    typeColor: '#16a34a',
-    title: 'Visita de Acompanhamento',
-    date: '10 Nov 2023 · 14:00',
-    note: '"Família receptiva, metas de saúde em andamento."',
-  },
-  {
-    id: 'h3',
-    type: 'CONCLUÍDO',
-    typeColor: '#16a34a',
-    title: 'Triagem Inicial e Cadastro',
-    date: '25 Out 2023 · 11:00',
-  },
-]
+interface Intervention {
+  id: string
+  citizenId: string
+  citizenName: string
+  citizenTerritory?: string | null
+  workerName: string
+  title: string
+  plan: string
+  status: 'aberto' | 'em_andamento' | 'suspenso' | 'concluido'
+  followUps: Array<{ date: string; note: string; workerName: string }>
+  createdAt: string
+  updatedAt: string
+}
 
 /* ------------------------------------------------------------------ */
-/*  Sub-components                                                      */
+/*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
 
-function ProgressBar({ value, color }: { value: number; color: string }) {
+const STATUS_CONFIG = {
+  aberto:       { label: 'Aberto',       bg: '#dbeafe', text: '#1d4ed8', dot: '#3b82f6' },
+  em_andamento: { label: 'Em Andamento', bg: '#dcfce7', text: '#15803d', dot: '#22c55e' },
+  suspenso:     { label: 'Suspenso',     bg: '#fef3c7', text: '#b45309', dot: '#f59e0b' },
+  concluido:    { label: 'Concluído',    bg: '#f0fdf4', text: '#166534', dot: '#16a34a' },
+} as const
+
+function StatusBadge({ status }: { status: keyof typeof STATUS_CONFIG }) {
+  const cfg = STATUS_CONFIG[status]
   return (
-    <div className="h-1.5 bg-slate-100 rounded-full overflow-hidden mt-2">
-      <div className="h-full rounded-full transition-all duration-500" style={{ width: `${value}%`, background: color }} />
+    <span
+      className="inline-flex items-center gap-1.5 text-xs font-semibold px-2.5 py-1 rounded-full"
+      style={{ background: cfg.bg, color: cfg.text }}
+    >
+      <span className="w-1.5 h-1.5 rounded-full" style={{ background: cfg.dot }} />
+      {cfg.label}
+    </span>
+  )
+}
+
+function InterventionCard({ item, onStatusChange }: {
+  item: Intervention
+  onStatusChange: (id: string, status: Intervention['status']) => void
+}) {
+  const [changing, setChanging] = useState(false)
+
+  async function handleConclude() {
+    if (!confirm('Marcar intervenção como concluída?')) return
+    setChanging(true)
+    try {
+      await fetch(`/api/interventions/${item.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'concluido' }),
+      })
+      onStatusChange(item.id, 'concluido')
+    } finally {
+      setChanging(false)
+    }
+  }
+
+  return (
+    <div className="glass-card card-surface-hover p-5 fade-in">
+      {/* Header */}
+      <div className="flex items-start justify-between gap-3 mb-3">
+        <div className="flex-1 min-w-0">
+          <p className="font-bold text-[#0f172a] text-sm leading-snug mb-0.5">{item.title}</p>
+          <p className="text-xs text-slate-500">
+            Cidadão:{' '}
+            <Link href={`/citizen/${item.citizenId}`} className="text-[#1e3a5f] hover:underline font-medium">
+              {item.citizenName}
+            </Link>
+            {item.citizenTerritory && ` · ${item.citizenTerritory}`}
+          </p>
+        </div>
+        <StatusBadge status={item.status} />
+      </div>
+
+      {/* Plan excerpt */}
+      <p className="text-xs text-slate-600 leading-relaxed line-clamp-2 mb-3">{item.plan}</p>
+
+      {/* Meta */}
+      <div className="flex items-center gap-4 text-xs text-slate-400 mb-4">
+        <span className="flex items-center gap-1">
+          <Users style={{ width: 12, height: 12 }} />
+          {item.workerName}
+        </span>
+        <span className="flex items-center gap-1">
+          <Calendar style={{ width: 12, height: 12 }} />
+          {new Date(item.createdAt).toLocaleDateString('pt-BR')}
+        </span>
+        {item.followUps.length > 0 && (
+          <span className="flex items-center gap-1">
+            <CheckSquare style={{ width: 12, height: 12 }} />
+            {item.followUps.length} acompan.
+          </span>
+        )}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-2">
+        <Link
+          href={`/citizen/${item.citizenId}`}
+          className="flex-1 text-center py-2 text-xs font-semibold text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors uppercase tracking-wide"
+        >
+          VER PRONTUÁRIO
+        </Link>
+        {item.status !== 'concluido' && (
+          <button
+            onClick={handleConclude}
+            disabled={changing}
+            className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold text-[#16a34a] border border-[#16a34a] rounded-lg hover:bg-green-50 transition-colors disabled:opacity-50"
+          >
+            {changing ? <Loader2 className="animate-spin" style={{ width: 12, height: 12 }} /> : <Check style={{ width: 12, height: 12 }} />}
+            Concluir
+          </button>
+        )}
+      </div>
     </div>
   )
 }
@@ -78,249 +136,141 @@ function ProgressBar({ value, color }: { value: number; color: string }) {
 /* ------------------------------------------------------------------ */
 
 export default function InterventionsPage() {
-  const [tasks, setTasks] = useState(TASKS)
-  const [status, setStatus] = useState<'aberta' | 'progresso' | 'resolvida'>('aberta')
-  const [visitDate] = useState('11/24/2023')
+  const [interventions, setInterventions] = useState<Intervention[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>('ativas')
 
-  function toggleTask(id: string) {
-    setTasks((prev) => prev.map((t) => t.id === id ? { ...t, done: !t.done } : t))
+  useEffect(() => {
+    async function load() {
+      setLoading(true)
+      setError(null)
+      try {
+        const params = new URLSearchParams()
+        if (statusFilter === 'ativas') params.set('status', 'em_andamento')
+        else if (statusFilter === 'abertas') params.set('status', 'aberto')
+        else if (statusFilter === 'concluidas') params.set('status', 'concluido')
+
+        const res = await fetch(`/api/interventions?${params}`)
+        if (!res.ok) throw new Error('Erro ao carregar intervenções')
+        const data = await res.json()
+        setInterventions(data)
+      } catch {
+        setError('Não foi possível carregar as intervenções.')
+      } finally {
+        setLoading(false)
+      }
+    }
+    load()
+  }, [statusFilter])
+
+  function handleStatusChange(id: string, status: Intervention['status']) {
+    setInterventions((prev) => prev.map((i) => i.id === id ? { ...i, status } : i))
+  }
+
+  const FILTERS = [
+    { key: 'ativas', label: 'Em Andamento' },
+    { key: 'abertas', label: 'Abertas' },
+    { key: 'concluidas', label: 'Concluídas' },
+    { key: 'todas', label: 'Todas' },
+  ]
+
+  const stats = {
+    total: interventions.length,
+    ativas: interventions.filter((i) => i.status === 'em_andamento').length,
+    abertas: interventions.filter((i) => i.status === 'aberto').length,
   }
 
   return (
-    <div className="p-4 lg:p-6 max-w-2xl mx-auto lg:max-w-3xl fade-in">
-      {/* Breadcrumb */}
-      <div className="flex items-center gap-1.5 text-xs text-slate-400 mb-4">
-        <span>Intervenções</span>
-        <ChevronRight style={{ width: 12, height: 12 }} />
-        <span className="text-slate-600 font-medium">Nova Visita e Planejamento</span>
-      </div>
-
-      {/* Page header */}
+    <div className="p-4 lg:p-6 max-w-2xl mx-auto lg:max-w-4xl fade-in">
+      {/* Header */}
       <div className="flex items-start justify-between mb-5">
-        <h1 className="page-title">Gestão de Intervenção:<br />Família Souza</h1>
-        <div className="flex gap-2">
-          <button className="px-3 py-2 text-xs border border-slate-200 rounded-xl text-slate-600 hover:bg-slate-50 transition-colors flex items-center gap-1.5 font-medium">
-            <FileText style={{ width: 14, height: 14 }} />
-            Relatório
-          </button>
-          <button className="px-3 py-2 text-xs bg-[#1e3a5f] text-white rounded-xl hover:bg-[#163059] transition-colors flex items-center gap-1.5 font-semibold">
-            <FileText style={{ width: 14, height: 14 }} />
-            Salvar Alterações
-          </button>
+        <div>
+          <h1 className="page-title">Gestão de Intervenções</h1>
+          <p className="page-subtitle">Acompanhamento de planos de intervenção social ativos.</p>
         </div>
+        <Link
+          href="/citizen/new"
+          className="flex items-center gap-2 px-4 py-2.5 bg-[#1e3a5f] text-white text-xs font-semibold rounded-xl hover:bg-[#163059] transition-colors shadow-sm"
+        >
+          <Plus style={{ width: 14, height: 14 }} />
+          Nova
+        </Link>
       </div>
 
-      {/* Step 1: Registrar Nova Visita */}
-      <div className="glass-card p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-[#1e3a5f] rounded-xl flex items-center justify-center">
-              <Home className="text-white" style={{ width: 18, height: 18 }} />
+      {/* Summary stats */}
+      <div className="grid grid-cols-3 gap-3 mb-5">
+        {[
+          { label: 'Total', value: stats.total, color: '#1e3a5f', icon: Target },
+          { label: 'Em Andamento', value: stats.ativas, color: '#16a34a', icon: Clock },
+          { label: 'Abertas', value: stats.abertas, color: '#0891b2', icon: AlertCircle },
+        ].map(({ label, value, color, icon: Icon }) => (
+          <div key={label} className="stat-card fade-in">
+            <div className="flex items-center justify-between mb-2">
+              <p className="stat-label">{label}</p>
+              <Icon style={{ width: 14, height: 14, color }} />
             </div>
-            <div>
-              <p className="font-bold text-sm text-[#0f172a]">Registrar Nova Visita Domiciliar</p>
-            </div>
+            <p className="stat-value" style={{ color }}>{value}</p>
           </div>
-          <div className="bg-[#1e3a5f] text-white text-[10px] font-bold px-2 py-1 rounded-lg">
-            PASSO 1 DE 3
-          </div>
-        </div>
+        ))}
+      </div>
 
+      {/* Status filter */}
+      <div className="flex gap-2 flex-wrap mb-5">
+        {FILTERS.map((f) => (
+          <button
+            key={f.key}
+            onClick={() => setStatusFilter(f.key)}
+            className={`text-xs px-4 py-2 rounded-full border transition-colors font-medium ${
+              statusFilter === f.key
+                ? 'bg-[#1e3a5f] text-white border-[#1e3a5f]'
+                : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+            }`}
+          >
+            {f.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Loading */}
+      {loading && (
         <div className="space-y-4">
-          {/* Date */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Data da Visita</label>
-            <input
-              type="date"
-              defaultValue="2023-11-24"
-              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:border-[#1e3a5f] transition-colors"
-            />
-          </div>
-
-          {/* Worker */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Técnico Responsável</label>
-            <select className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 focus:outline-none focus:border-[#1e3a5f] transition-colors appearance-none">
-              <option>Ana Silva (Assistente Social)</option>
-              <option>Marcos Lima (Agente de Saúde)</option>
-            </select>
-          </div>
-
-          {/* Objective */}
-          <div>
-            <label className="block text-xs font-semibold text-slate-500 mb-1.5 uppercase tracking-wide">Objetivo da Intervenção</label>
-            <textarea
-              rows={3}
-              placeholder="Descreva o propósito principal desta visita..."
-              className="w-full px-4 py-3 bg-white border border-slate-200 rounded-xl text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-[#1e3a5f] transition-colors resize-none"
-            />
-          </div>
-
-          {/* Upload */}
-          <div className="border-2 border-dashed border-slate-200 rounded-xl px-4 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-2 text-slate-400 text-sm">
-              <Upload style={{ width: 16, height: 16 }} />
-              <span>Anexar evidências (fotos, documentos, assinaturas)</span>
+          {[1, 2, 3].map((i) => (
+            <div key={i} className="glass-card p-5 animate-pulse">
+              <div className="h-4 bg-slate-200 rounded w-3/4 mb-2" />
+              <div className="h-3 bg-slate-200 rounded w-1/2 mb-4" />
+              <div className="h-3 bg-slate-200 rounded w-full mb-1" />
+              <div className="h-3 bg-slate-200 rounded w-2/3" />
             </div>
-            <button className="text-xs font-semibold text-[#1e3a5f] border border-[#1e3a5f] px-3 py-1.5 rounded-lg hover:bg-[#1e3a5f]/5 transition-colors">
-              Upload
-            </button>
-          </div>
+          ))}
         </div>
-      </div>
+      )}
 
-      {/* Active Goals */}
-      <div className="glass-card p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="flex items-center gap-2 font-bold text-sm text-[#0f172a]">
-            <Target style={{ width: 18, height: 18, color: '#0891b2' }} />
-            Metas Ativas
-          </h2>
-          <button className="w-8 h-8 rounded-full border border-slate-200 flex items-center justify-center text-slate-400 hover:bg-slate-50 transition-colors">
-            <Plus style={{ width: 16, height: 16 }} />
-          </button>
+      {/* Error */}
+      {error && !loading && (
+        <div className="flex items-center gap-2 text-red-600 text-sm bg-red-50 border border-red-100 rounded-xl p-4">
+          <AlertCircle style={{ width: 16, height: 16 }} />
+          {error}
         </div>
+      )}
 
+      {/* Results */}
+      {!loading && !error && (
         <div className="space-y-4">
-          {ACTIVE_GOALS.map((g) => (
-            <div key={g.id}>
-              <div className="flex items-center justify-between mb-1">
-                <span
-                  className="text-[10px] font-bold uppercase tracking-widest"
-                  style={{ color: g.color }}
-                >
-                  {g.category}
-                </span>
-                <span className="text-[10px] text-slate-400">{g.deadline}</span>
-              </div>
-              <p className="text-sm text-slate-600 leading-snug">{g.text}</p>
-              <ProgressBar value={g.progress} color={g.color} />
+          {interventions.map((item) => (
+            <InterventionCard key={item.id} item={item} onStatusChange={handleStatusChange} />
+          ))}
+          {interventions.length === 0 && (
+            <div className="glass-card p-12 text-center">
+              <ChevronRight className="mx-auto mb-3 text-slate-300" style={{ width: 36, height: 36 }} />
+              <p className="text-slate-500 font-medium">Nenhuma intervenção encontrada</p>
+              <p className="text-slate-400 text-sm mt-1">
+                {statusFilter === 'ativas' ? 'Nenhuma intervenção em andamento.' : 'Sem registros para o filtro selecionado.'}
+              </p>
             </div>
-          ))}
+          )}
         </div>
-      </div>
-
-      {/* Tasks */}
-      <div className="glass-card p-5 mb-4">
-        <h2 className="flex items-center gap-2 font-bold text-sm text-[#0f172a] mb-4">
-          <CheckSquare style={{ width: 18, height: 18, color: '#0891b2' }} />
-          Próximas Tarefas
-        </h2>
-
-        <div className="space-y-2.5">
-          {tasks.map((task) => (
-            <button
-              key={task.id}
-              onClick={() => toggleTask(task.id)}
-              className="w-full flex items-center gap-3 text-left hover:bg-slate-50 rounded-lg p-1.5 transition-colors"
-            >
-              <div className={`w-5 h-5 rounded flex items-center justify-center flex-shrink-0 border-2 transition-colors ${
-                task.done
-                  ? 'bg-[#1e3a5f] border-[#1e3a5f]'
-                  : 'border-slate-300'
-              }`}>
-                {task.done && <Check style={{ width: 12, height: 12, color: 'white' }} />}
-              </div>
-              <span className={`text-sm ${task.done ? 'line-through text-slate-400' : 'text-slate-700'}`}>
-                {task.label}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        <button className="mt-3 text-xs text-[#1e3a5f] font-medium hover:underline">
-          + Adicionar tarefa rápida...
-        </button>
-      </div>
-
-      {/* Status */}
-      <div className="glass-card p-5 mb-4">
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-3">STATUS DA INTERVENÇÃO</p>
-        <div className="space-y-2">
-          {([ 
-            { key: 'aberta', label: 'Aberta', Icon: Calendar },
-            { key: 'progresso', label: 'Em Progresso', Icon: ChevronRight },
-            { key: 'resolvida', label: 'Resolvida', Icon: Check },
-          ] as const).map(({ key, label, Icon }) => (
-            <button
-              key={key}
-              onClick={() => setStatus(key)}
-              className={`w-full flex items-center justify-between px-4 py-3 rounded-xl border transition-all text-sm font-medium ${
-                status === key
-                  ? 'border-[#1e3a5f] bg-[#1e3a5f]/5 text-[#1e3a5f]'
-                  : 'border-slate-200 text-slate-500 hover:border-slate-300'
-              }`}
-            >
-              <div className="flex items-center gap-2.5">
-                <Icon style={{ width: 16, height: 16 }} />
-                {label}
-              </div>
-              {status === key && (
-                <div className="w-5 h-5 rounded-full bg-[#1e3a5f] flex items-center justify-center">
-                  <Check style={{ width: 12, height: 12, color: 'white' }} />
-                </div>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* History */}
-      <div className="glass-card p-5 mb-4">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-bold text-sm text-[#0f172a]">Histórico de Acompanhamento</h2>
-          <button className="text-slate-400 hover:text-slate-600 transition-colors">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/>
-              <line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/>
-              <line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>
-            </svg>
-          </button>
-        </div>
-
-        <div className="space-y-4">
-          {HISTORY.map((h) => (
-            <div key={h.id} className="flex gap-3">
-              <div
-                className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 mt-0.5"
-                style={{ background: h.typeColor + '20' }}
-              >
-                {h.type === 'AGENDADO'
-                  ? <Calendar style={{ width: 14, height: 14, color: h.typeColor }} />
-                  : <Check style={{ width: 14, height: 14, color: h.typeColor }} />}
-              </div>
-              <div>
-                <p
-                  className="text-[10px] font-bold uppercase tracking-widest mb-0.5"
-                  style={{ color: h.typeColor }}
-                >
-                  {h.type}
-                </p>
-                <p className="text-sm font-semibold text-[#0f172a]">{h.title}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{h.date}</p>
-                {h.note && <p className="text-xs text-slate-500 italic mt-1">{h.note}</p>}
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <button className="mt-4 text-xs text-[#1e3a5f] font-semibold hover:underline">
-          Ver histórico completo
-        </button>
-      </div>
-
-      {/* Progress bar */}
-      <div className="glass-card p-5 mb-6" style={{ borderLeft: '3px solid #16a34a' }}>
-        <p className="text-xs font-bold uppercase tracking-widest text-slate-400 mb-1">PROGRESSO DO CASO</p>
-        <div className="flex items-center justify-between mb-2">
-          <p className="text-sm font-semibold text-[#0f172a]">Estágio: Monitoramento</p>
-          <span className="text-sm font-bold text-[#16a34a]">75%</span>
-        </div>
-        <ProgressBar value={75} color="#16a34a" />
-        <p className="text-xs text-slate-500 mt-3 leading-relaxed">
-          Próxima revisão obrigatória em 12 dias. Mantenha os registros de visita atualizados para a métrica de risco.
-        </p>
-      </div>
+      )}
     </div>
   )
 }
