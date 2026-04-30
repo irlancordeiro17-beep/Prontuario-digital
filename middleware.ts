@@ -1,9 +1,26 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { getToken } from 'next-auth/jwt'
+
+// ============================================================
+// PRONTUÁRIO SOCIAL — Middleware
+// MVP Demo Mode: Auth is disabled for public demonstration
+// When connecting real DB: re-enable JWT check below
+// ============================================================
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl
+
+  // Always allow API routes and static assets
+  if (pathname.startsWith('/api/') || pathname.startsWith('/_next/')) {
+    return NextResponse.next()
+  }
+
+  // MVP DEMO MODE: allow all routes without authentication
+  // This enables the site to work publicly at prontuario-digital-coral.vercel.app
+  // TODO: re-enable auth when connecting real DATABASE_URL in production
+  if (!process.env.DATABASE_URL) {
+    return NextResponse.next()
+  }
 
   // Public routes — no auth required
   const publicRoutes = ['/login', '/forgot-password', '/api/auth']
@@ -15,7 +32,8 @@ export async function middleware(req: NextRequest) {
     return NextResponse.next()
   }
 
-  // Read JWT token (works in Edge runtime, no Prisma needed)
+  // Production auth: Read JWT token
+  const { getToken } = await import('next-auth/jwt')
   const token = await getToken({ req, secret: process.env.AUTH_SECRET })
 
   // Redirect unauthenticated users to login

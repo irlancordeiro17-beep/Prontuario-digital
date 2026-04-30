@@ -30,8 +30,8 @@ const roleLabels: Record<Role, string> = {
 
 const IS_DEV = process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === 'true'
 
-// Dev fallback user
-const DEV_USER = {
+// Demo fallback user — used when no session and no real DB configured
+const DEMO_USER = {
   name: 'Ana Silva',
   email: 'ana.silva@ubs.gov.br',
   role: 'gestor' as Role,
@@ -41,8 +41,10 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { data: session } = useSession()
   const pathname = usePathname()
 
-  const userName = session?.user?.name ?? (IS_DEV ? DEV_USER.name : 'Usuário')
-  const role = ((session?.user as any)?.role ?? (IS_DEV ? DEV_USER.role : undefined)) as Role | undefined
+  // Use demo user when: no real session exists (demo/dev mode)
+  const useDemoUser = !session?.user
+  const userName = session?.user?.name ?? DEMO_USER.name
+  const role = ((session?.user as any)?.role ?? DEMO_USER.role) as Role | undefined
   const visibleNav = navItems.filter((item) => !role || item.roles.includes(role))
 
   const initials = userName
