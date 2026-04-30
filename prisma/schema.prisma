@@ -1,0 +1,257 @@
+// This is your Prisma schema file for Prontuário Social
+// Isolated project — no relation to CaptaRH, Pulso Cultural, or SeOri
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+
+
+// ============================================================
+// AUTH
+// ============================================================
+
+enum Role {
+  admin
+  gestor
+  agente_saude
+}
+
+model User {
+  id            String   @id @default(cuid())
+  name          String
+  email         String   @unique
+  password      String   // bcrypt hash
+  role          Role     @default(agente_saude)
+  ubs           String?  // Unidade Básica de Saúde vinculada
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  visits        VisitRecord[]
+  interventions Intervention[]
+  auditLogs     AuditLog[]
+
+  @@map("users")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@map("password_reset_tokens")
+}
+
+// ============================================================
+// CITIZEN
+// ============================================================
+
+model Citizen {
+  id          String   @id @default(cuid())
+  cns         String   @unique // Cartão Nacional de Saúde
+  cpf         String   @unique
+  name        String
+  sex         String   // M | F
+  dateOfBirth DateTime
+  ubs         String   // UBS vinculada
+  territory   String?  // Bairro/território
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  clinicalHistory   ClinicalEntry[]
+  prescriptions     Prescription[]
+  socialRecord      SocialRecord?
+  vulnerabilityScore VulnerabilityScore?
+  visits            VisitRecord[]
+  interventions     Intervention[]
+  riskAlerts        RiskAlert[]
+
+  @@map("citizens")
+}
+
+// ============================================================
+// CLINICAL HISTORY (CID-10)
+// ============================================================
+
+model ClinicalEntry {
+  id          String   @id @default(cuid())
+  citizenId   String
+  citizen     Citizen  @relation(fields: [citizenId], references: [id])
+  cid10       String   // ex: I10, E11, F41
+  diagnosis   String   // ex: Hipertensão Arterial
+  diagnosedAt DateTime // mês/ano do diagnóstico
+  status      String   // em_acompanhamento | controlado | psicossocial | inativo
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("clinical_entries")
+}
+
+// ============================================================
+// PRESCRIPTIONS
+// ============================================================
+
+model Prescription {
+  id          String   @id @default(cuid())
+  citizenId   String
+  citizen     Citizen  @relation(fields: [citizenId], references: [id])
+  medication  String   // ex: Losartana Potássica
+  dosage      String   // ex: 50mg
+  frequency   String   // ex: 1x/dia
+  route       String   // ex: Oral
+  status      String   // ativo | suspenso | concluido
+  // NOTE: agente_saude role — prescription creation permission TBD by user
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("prescriptions")
+}
+
+// ============================================================
+// SOCIAL DETERMINANTS (DSS)
+// ============================================================
+
+model SocialRecord {
+  id                  String   @id @default(cuid())
+  citizenId           String   @unique
+  citizen             Citizen  @relation(fields: [citizenId], references: [id])
+  housingQuality      Int      // 0-100
+  monthlyIncome       Float    // R$ valor
+  sanitationLevel     Int      // 1-5 (1=deficiente, 5=adequado)
+  foodSecurity        Int      // 1-5 (1=insegurança grave, 5=segurança plena)
+  educationLevel      String?  // fundamental | medio | superior | nenhum
+  employmentStatus    String?  // empregado | desempregado | informal | aposentado
+  notes               String?
+  updatedAt           DateTime @updatedAt
+  createdAt           DateTime @default(now())
+
+  @@map("social_records")
+}
+
+// ============================================================
+// VULNERABILITY SCORE
+// ============================================================
+
+model VulnerabilityScore {
+  id          String   @id @default(cuid())
+  citizenId   String   @unique
+  citizen     Citizen  @relation(fields: [citizenId], references: [id])
+  score       Int      // 0-100 (calculado)
+  category    String   // baixo | medio | moderado_alto | critico
+  factors     Json     // snapshot dos fatores usados no cálculo
+  calculatedAt DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("vulnerability_scores")
+}
+
+// ============================================================
+// VISIT RECORDS
+// ============================================================
+
+model VisitRecord {
+  id         String   @id @default(cuid())
+  citizenId  String
+  citizen    Citizen  @relation(fields: [citizenId], references: [id])
+  workerId   String
+  worker     User     @relation(fields: [workerId], references: [id])
+  type       String   // domiciliar | consultorio | remoto
+  date       DateTime
+  notes      String?
+  createdAt  DateTime @default(now())
+
+  @@map("visit_records")
+}
+
+// ============================================================
+// INTERVENTIONS / CASE MANAGEMENT
+// ============================================================
+
+enum InterventionStatus {
+  aberto
+  em_andamento
+  suspenso
+  concluido
+}
+
+model Intervention {
+  id          String             @id @default(cuid())
+  citizenId   String
+  citizen     Citizen            @relation(fields: [citizenId], references: [id])
+  workerId    String
+  worker      User               @relation(fields: [workerId], references: [id])
+  title       String
+  plan        String             // plano de intervenção
+  status      InterventionStatus @default(aberto)
+  followUps   Json               @default("[]") // array de {date, note, workerId}
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  @@map("interventions")
+}
+
+// ============================================================
+// RISK ALERTS
+// ============================================================
+
+enum AlertSeverity {
+  baixo
+  medio
+  alto
+  critico
+}
+
+model RiskAlert {
+  id          String        @id @default(cuid())
+  citizenId   String
+  citizen     Citizen       @relation(fields: [citizenId], references: [id])
+  severity    AlertSeverity
+  category    String        // clinico | social | territorial
+  description String
+  resolvedAt  DateTime?
+  createdAt   DateTime      @default(now())
+
+  @@map("risk_alerts")
+}
+
+// ============================================================
+// TERRITORIES (GeoJSON reference)
+// ============================================================
+
+model Territory {
+  id       String  @id @default(cuid())
+  name     String  @unique // ex: Comércio, Subúrbio Ferroviário
+  city     String  @default("Salvador")
+  state    String  @default("BA")
+  geometry Json?   // GeoJSON polygon
+
+  @@map("territories")
+}
+
+// ============================================================
+// AUDIT LOG (LGPD compliance)
+// ============================================================
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id])
+  action     String   // CREATE | UPDATE | DELETE | VIEW
+  resource   String   // citizen | intervention | social_record
+  resourceId String
+  metadata   Json?
+  createdAt  DateTime @default(now())
+
+  @@map("audit_logs")
+}
