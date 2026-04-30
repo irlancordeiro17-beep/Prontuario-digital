@@ -93,7 +93,9 @@ export default function CitizenDetailPage() {
     queryFn: async () => {
       const res = await fetch(`/api/citizens/${id}`)
       if (!res.ok) throw new Error('Cidadão não encontrado')
-      const raw = await res.json()
+      const json = await res.json()
+      // API returns { data: {...}, error: null } — unwrap if needed
+      const raw = json?.data !== undefined ? json.data : json
       return flattenCitizenResponse(raw)
     },
   })

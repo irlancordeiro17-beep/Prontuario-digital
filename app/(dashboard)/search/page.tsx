@@ -152,7 +152,9 @@ export default function SearchPage() {
 
       const res = await fetch(`/api/citizens?${params.toString()}`)
       if (!res.ok) throw new Error('Erro ao buscar cidadãos')
-      const data: CitizenResult[] = await res.json()
+      const json = await res.json()
+      // API returns { data: CitizenResult[], error: null }
+      const data: CitizenResult[] = Array.isArray(json) ? json : (json.data ?? [])
       setResults(data)
     } catch (err) {
       setError('Não foi possível buscar os dados. Tente novamente.')

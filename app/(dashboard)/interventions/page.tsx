@@ -153,7 +153,9 @@ export default function InterventionsPage() {
 
         const res = await fetch(`/api/interventions?${params}`)
         if (!res.ok) throw new Error('Erro ao carregar intervenções')
-        const data = await res.json()
+        const json = await res.json()
+        // API returns { data: [...], error: null } — unwrap if needed
+        const data = Array.isArray(json) ? json : (json.data ?? [])
         setInterventions(data)
       } catch {
         setError('Não foi possível carregar as intervenções.')
